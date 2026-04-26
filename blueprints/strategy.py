@@ -938,13 +938,13 @@ def webhook(webhook_id):
                 return jsonify(
                     {"error": "Invalid action for LONG mode. Use BUY to enter, SELL to exit"}
                 ), 400
-            use_smart_order = action == "SELL"
+            use_smart_order = action == "SELL" and strategy.is_intraday
         elif strategy.trading_mode == "SHORT":
             if action not in ["BUY", "SELL"]:
                 return jsonify(
                     {"error": "Invalid action for SHORT mode. Use SELL to enter, BUY to exit"}
                 ), 400
-            use_smart_order = action == "BUY"
+            use_smart_order = action == "BUY" and strategy.is_intraday
         else:  # BOTH mode
             if action not in ["BUY", "SELL"]:
                 return jsonify({"error": "Invalid action. Use BUY or SELL"}), 400
