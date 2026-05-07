@@ -977,6 +977,9 @@ def webhook(webhook_id):
             logger.error(f"No API key found for user {strategy.user_id}")
             return jsonify({"error": "No API key found"}), 401
 
+        price_type = data.get("pricetype", "MARKET").upper()
+        is_market = price_type == "MARKET"
+
         # Prepare order payload
         payload = {
             "apikey": api_key,
@@ -985,7 +988,7 @@ def webhook(webhook_id):
             "product": mapping.product_type,
             "strategy": strategy.name,
             "action": action,
-            "pricetype": "MARKET",
+            "pricetype": price_type,
         }
 
         # Set quantity based on order type
@@ -999,7 +1002,7 @@ def webhook(webhook_id):
                     "position_size": str(
                         position_size
                     ),  # Use position_size directly from webhook data
-                    "price": "0",
+                    "price": "0" if is_market else str(data.get("price", "0")),
                     "trigger_price": "0",
                     "disclosed_quantity": "0",
                 }
@@ -1012,7 +1015,7 @@ def webhook(webhook_id):
                     {
                         "quantity": "0",
                         "position_size": "0",  # This will close the position
-                        "price": "0",
+                        "price": "0" if is_market else str(data.get("price", "0")),
                         "trigger_price": "0",
                         "disclosed_quantity": "0",
                     }
@@ -1021,7 +1024,7 @@ def webhook(webhook_id):
             else:
                 # For regular orders, use absolute value of position_size if provided, otherwise use mapping quantity
                 quantity = abs(position_size) if position_size != 0 else mapping.quantity
-                payload.update({"quantity": str(quantity)})
+                payload.update({"quantity": str(quantity), "price": "0" if is_market else str(data.get("price", "0"))})
                 endpoint = "placeorder"
 
         # Queue the order
