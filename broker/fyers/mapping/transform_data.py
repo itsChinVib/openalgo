@@ -31,7 +31,7 @@ def transform_data(data):
         "offlineOrder": False,
         "stopLoss": 0,
         "takeProfit": 0,
-        "orderTag": "openalgo",
+        "orderTag": str(data.get("strategy", "openalgo"))[:30],
     }
 
     return transformed
