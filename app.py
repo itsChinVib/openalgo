@@ -7,6 +7,27 @@ import os
 import re
 import sys
 
+
+def _ensure_db_directory() -> None:
+    """Create the SQLite database directory before any engine connects.
+
+    On a fresh install ``db/`` does not exist yet, and the database engines (and
+    their background threads) are created/used in parallel during startup. The
+    first connection then fails with ``unable to open database file``, which can
+    leave a database partially initialized. Creating the directory up front, before
+    any database module is imported, removes that race. Derived from DATABASE_URL
+    (all SQLite databases live under the same directory).
+    """
+    db_url = os.getenv("DATABASE_URL", "sqlite:///db/openalgo.db")
+    if db_url.startswith("sqlite:///"):
+        db_path = db_url.replace("sqlite:///", "", 1)
+        db_dir = os.path.dirname(os.path.abspath(db_path))
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
+
+
+_ensure_db_directory()
+
 # Show loading indicator early (before heavy imports) so user sees immediate feedback.
 # The full banner with "Ready" status prints later, right before the server accepts connections.
 if __name__ == "__main__":
@@ -35,6 +56,7 @@ from blueprints.broker_credentials import (
     broker_credentials_bp,  # Import the broker credentials blueprint
 )
 from blueprints.chartink import chartink_bp  # Import the chartink blueprint
+from blueprints.chart_test import chart_test_bp  # Standalone chart test page (dev/testing only)
 from blueprints.strategy_portfolio import strategy_portfolio_bp  # Strategy Builder portfolio
 from blueprints.core import core_bp
 from blueprints.dashboard import dashboard_bp
@@ -43,9 +65,12 @@ from blueprints.gc_json import gc_json_bp
 from blueprints.gex import gex_bp  # Import the GEX blueprint
 from blueprints.ivsmile import ivsmile_bp  # Import the IV Smile blueprint
 from blueprints.oiprofile import oiprofile_bp  # Import the OI Profile blueprint
+from blueprints.arbitrage import arbitrage_bp  # Import the Arbitrage blueprint
 from blueprints.historify import historify_bp  # Import the historify blueprint
 from blueprints.ivchart import ivchart_bp  # Import the IV chart blueprint
+from blueprints.scalping import scalping_bp  # Import the Scalping terminal blueprint
 from blueprints.oitracker import oitracker_bp  # Import the OI tracker blueprint
+from blueprints.gamma_density import gamma_density_bp  # Import the Gamma Density blueprint
 from blueprints.straddle_chart import straddle_bp  # Import the straddle chart blueprint
 from blueprints.strategy_chart import strategy_chart_bp  # Import the strategy chart blueprint
 from blueprints.custom_straddle import custom_straddle_bp  # Import custom straddle blueprint
@@ -93,6 +118,7 @@ from database.historify_db import init_database as ensure_historify_tables_exist
 from database.latency_db import init_latency_db as ensure_latency_tables_exists
 from database.leverage_db import init_db as ensure_leverage_tables_exists
 from database.sandbox_db import init_db as ensure_sandbox_tables_exists
+from database.scalping_db import init_db as ensure_scalping_tables_exists
 from database.settings_db import init_db as ensure_settings_tables_exists
 from database.strategy_db import init_db as ensure_strategy_tables_exists
 from database.symbol import init_db as ensure_master_contract_tables_exists
@@ -273,6 +299,7 @@ def create_app():
     app.register_blueprint(strategy_bp)
     app.register_blueprint(master_contract_status_bp)
     app.register_blueprint(websocket_bp)  # Register WebSocket example blueprint
+    app.register_blueprint(chart_test_bp)  # Register standalone chart test page (dev/testing only)
     app.register_blueprint(pnltracker_bp)  # Register PnL tracker blueprint
     app.register_blueprint(python_strategy_bp)  # Register Python strategy blueprint
     app.register_blueprint(telegram_bp)  # Register Telegram blueprint
@@ -284,7 +311,9 @@ def create_app():
     app.register_blueprint(admin_bp)  # Register Admin blueprint
     app.register_blueprint(historify_bp)  # Register Historify blueprint
     app.register_blueprint(ivchart_bp)  # Register IV chart blueprint
+    app.register_blueprint(scalping_bp)  # Register Scalping terminal blueprint
     app.register_blueprint(oitracker_bp)  # Register OI tracker blueprint
+    app.register_blueprint(gamma_density_bp)  # Register Gamma Density blueprint
     app.register_blueprint(straddle_bp)  # Register straddle chart blueprint
     app.register_blueprint(strategy_chart_bp)  # Register strategy chart blueprint
     app.register_blueprint(custom_straddle_bp)  # Register custom straddle blueprint
@@ -292,6 +321,7 @@ def create_app():
     app.register_blueprint(gex_bp)  # Register GEX blueprint
     app.register_blueprint(ivsmile_bp)  # Register IV Smile blueprint
     app.register_blueprint(oiprofile_bp)  # Register OI Profile blueprint
+    app.register_blueprint(arbitrage_bp)  # Register Arbitrage blueprint
     app.register_blueprint(flow_bp)  # Register Flow blueprint
     app.register_blueprint(broker_credentials_bp)  # Register Broker credentials blueprint
     app.register_blueprint(system_permissions_bp)  # Register System permissions blueprint
@@ -639,6 +669,7 @@ def setup_environment(app):
                 ("Qty Freeze DB", ensure_qty_freeze_tables_exists),
                 ("Historify DB", ensure_historify_tables_exists),
                 ("Flow DB", ensure_flow_tables_exists),
+                ("Scalping DB", ensure_scalping_tables_exists),
                 ("Leverage DB", ensure_leverage_tables_exists),
                 ("Strategy Portfolio DB", ensure_strategy_portfolio_tables_exists),
             ]
@@ -681,6 +712,17 @@ def setup_environment(app):
                 logger.debug("Historify scheduler initialized")
             except Exception as e:
                 logger.error(f"Failed to initialize Historify scheduler: {e}")
+
+            try:
+                # Server-side scalping SL / target / trailing-stop engine. Runs
+                # browser-independently so stops keep working after the user
+                # leaves /scalping or closes the tab. Idles when no SL is set.
+                from services.scalping_risk_monitor_service import start_scalping_risk_monitor
+
+                start_scalping_risk_monitor()
+                logger.debug("Scalping risk monitor initialized")
+            except Exception as e:
+                logger.error(f"Failed to initialize Scalping risk monitor: {e}")
 
             # Auto-reconnect the WhatsApp bot if a paired session is persisted.
             # Without this, every server restart would leave is_ready()=False
@@ -862,6 +904,7 @@ def shutdown_database_sessions(exception=None):
         ("database.chart_prefs_db", "db_session"),
         ("database.chartink_db", "db_session"),
         ("database.flow_db", "db_session"),
+        ("database.scalping_db", "db_session"),
         ("database.leverage_db", "db_session"),
         ("database.strategy_portfolio_db", "db_session"),
         ("database.market_calendar_db", "db_session"),
